@@ -12,6 +12,8 @@ An MCP (Model Context Protocol) server that provides access to Overleaf projects
 
 ## Quick Start (recommended)
 
+> Requires `@mjyoo2/overleaf-mcp` to be published to npm. If you're reading this from a freshly-cloned repo and the package isn't on the registry yet, jump to [Local Development](#local-development) for a working local install.
+
 No clone, no `npm install`. Add this block to your Claude Desktop config and restart Claude Desktop.
 
 **Config file location**
@@ -101,15 +103,80 @@ Then specify the project in tool calls: `projectName: "paper2"`.
 
 ## Local Development
 
-If you want to hack on the server itself:
+If you want to hack on the server, test changes before publishing, or use it without the npm package being available, you have three local-install options.
+
+### Option 1 — Run the cloned script directly
 
 ```bash
 git clone https://github.com/mjyoo2/OverleafMCP.git
 cd OverleafMCP
 npm install
-cp projects.example.json projects.json   # then edit it
-node overleaf-mcp-server.js               # or wire it into Claude Desktop with an absolute path
 ```
+
+Then point Claude Desktop at the script and pass credentials via env vars (the same loader path the npm package uses):
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "node",
+      "args": ["/absolute/path/to/OverleafMCP/overleaf-mcp-server.js"],
+      "env": {
+        "OVERLEAF_PROJECT_ID": "...",
+        "OVERLEAF_GIT_TOKEN": "olp_..."
+      }
+    }
+  }
+}
+```
+
+On Windows, `args` should use `"C:\\Users\\you\\OverleafMCP\\overleaf-mcp-server.js"`.
+
+If you'd rather use a multi-project file:
+
+```bash
+cp projects.example.json projects.json   # then edit it
+```
+
+`projects.json` next to the script is the lowest-priority fallback, so this still works without env vars.
+
+### Option 2 — Test the would-be npm package via a local tarball
+
+This validates the same code path users will hit after `npm publish` (excluding registry resolution):
+
+```bash
+npm pack
+# → mjyoo2-overleaf-mcp-0.2.0.tgz
+```
+
+Point Claude Desktop at the tarball — `npx` accepts a file path:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "/absolute/path/to/mjyoo2-overleaf-mcp-0.2.0.tgz"],
+      "env": {
+        "OVERLEAF_PROJECT_ID": "...",
+        "OVERLEAF_GIT_TOKEN": "olp_..."
+      }
+    }
+  }
+}
+```
+
+(Drop the `cmd /c` wrapper on macOS / Linux: `"command": "npx", "args": ["-y", "/path/to/...tgz"]`.)
+
+### Option 3 — Smoke-test the MCP protocol from the shell
+
+No Claude Desktop required:
+
+```bash
+OVERLEAF_PROJECT_ID=... OVERLEAF_GIT_TOKEN=... node overleaf-mcp-server.js
+```
+
+You should see `Overleaf MCP server running on stdio` on stderr. The process stays open waiting for JSON-RPC on stdin; Ctrl+C to exit.
 
 ## Available Tools
 

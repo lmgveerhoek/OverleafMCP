@@ -10,64 +10,106 @@ An MCP (Model Context Protocol) server that provides access to Overleaf projects
 - 📊 **Project Summary**: Get overview of project status and structure
 - 🏗️ **Multi-Project Support**: Manage multiple Overleaf projects
 
-## Installation
+## Quick Start (recommended)
 
-1. Clone this repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+No clone, no `npm install`. Add this block to your Claude Desktop config and restart Claude Desktop.
 
-3. Set up your projects configuration:
-   ```bash
-   cp projects.example.json projects.json
-   ```
+**Config file location**
 
-4. Edit `projects.json` with your Overleaf credentials:
-   ```json
-   {
-     "projects": {
-       "default": {
-         "name": "My Paper",
-         "projectId": "YOUR_OVERLEAF_PROJECT_ID",
-         "gitToken": "YOUR_OVERLEAF_GIT_TOKEN"
-       }
-     }
-   }
-   ```
+| OS      | Path |
+|---------|------|
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| macOS   | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Linux   | `~/.config/claude/claude_desktop_config.json` |
 
-## Getting Overleaf Credentials
-
-1. **Git Token**: 
-   - Go to Overleaf Account Settings → Git Integration
-   - Click "Create Token"
-
-2. **Project ID**: 
-   - Open your Overleaf project
-   - Find it in the URL: `https://www.overleaf.com/project/[PROJECT_ID]`
-
-## Claude Desktop Setup
-
-Add to your Claude Desktop configuration file:
-
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Linux**: `~/.config/claude/claude_desktop_config.json`
+**macOS / Linux**
 
 ```json
 {
   "mcpServers": {
     "overleaf": {
-      "command": "node",
-      "args": [
-        "/path/to/OverleafMCP/overleaf-mcp-server.js"
-      ]
+      "command": "npx",
+      "args": ["-y", "@mjyoo2/overleaf-mcp"],
+      "env": {
+        "OVERLEAF_PROJECT_ID": "YOUR_OVERLEAF_PROJECT_ID",
+        "OVERLEAF_GIT_TOKEN": "YOUR_OVERLEAF_GIT_TOKEN"
+      }
     }
   }
 }
 ```
 
-Restart Claude Desktop after configuration.
+**Windows** — Claude Desktop on Windows needs `cmd /c` to find `npx`:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@mjyoo2/overleaf-mcp"],
+      "env": {
+        "OVERLEAF_PROJECT_ID": "YOUR_OVERLEAF_PROJECT_ID",
+        "OVERLEAF_GIT_TOKEN": "YOUR_OVERLEAF_GIT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The `overleaf` tools should appear in the 🔧 menu.
+
+## Getting Overleaf Credentials
+
+1. **Project ID** — open your Overleaf project; the ID is in the URL: `https://www.overleaf.com/project/[PROJECT_ID]`
+2. **Git Token** — Overleaf → Account Settings → Git Integration → "Create Token"
+
+## Configuration Reference
+
+The server picks the **first** matching configuration source:
+
+1. **Env vars (single project)** — `OVERLEAF_PROJECT_ID` + `OVERLEAF_GIT_TOKEN`. Optional: `OVERLEAF_PROJECT_NAME` for the display name.
+2. **Token from a file** — set `OVERLEAF_PROJECT_ID` together with `OVERLEAF_GIT_TOKEN_FILE=/path/to/token.txt` (instead of `OVERLEAF_GIT_TOKEN`). Useful when you don't want the token in the Claude Desktop JSON. The file is read once at startup and any trailing whitespace/newline is trimmed.
+3. **Multi-project file** — `OVERLEAF_PROJECTS_CONFIG=/absolute/path/projects.json`.
+4. **User config dir** — `projects.json` in:
+   - Windows: `%APPDATA%\overleaf-mcp\projects.json`
+   - macOS / Linux: `$XDG_CONFIG_HOME/overleaf-mcp/projects.json` (defaults to `~/.config/overleaf-mcp/projects.json`)
+5. **Working directory** — `./projects.json`
+6. **Package directory** — `projects.json` next to the server script (legacy, for clone-based installs).
+
+When env vars are set and a file is also present, env vars win and a notice is logged to stderr so the shadowing is visible.
+
+### `projects.json` schema (multi-project)
+
+```json
+{
+  "projects": {
+    "default": {
+      "name": "Main Paper",
+      "projectId": "...",
+      "gitToken": "olp_..."
+    },
+    "paper2": {
+      "name": "Second Paper",
+      "projectId": "...",
+      "gitToken": "olp_..."
+    }
+  }
+}
+```
+
+Then specify the project in tool calls: `projectName: "paper2"`.
+
+## Local Development
+
+If you want to hack on the server itself:
+
+```bash
+git clone https://github.com/mjyoo2/OverleafMCP.git
+cd OverleafMCP
+npm install
+cp projects.example.json projects.json   # then edit it
+node overleaf-mcp-server.js               # or wire it into Claude Desktop with an absolute path
+```
 
 ## Available Tools
 
@@ -139,49 +181,12 @@ Use write_file with filePath: "main.tex", content: "...", commitMessage: "..."
 Use write_section with filePath: "main.tex", sectionTitle: "Introduction", newContent: "\\section{Introduction}\n...", commitMessage: "..."
 ```
 
-## Multi-Project Usage
-
-To work with multiple projects, add them to `projects.json`:
-
-```json
-{
-  "projects": {
-    "default": {
-      "name": "Main Paper",
-      "projectId": "project-id-1",
-      "gitToken": "token-1"
-    },
-    "paper2": {
-      "name": "Second Paper", 
-      "projectId": "project-id-2",
-      "gitToken": "token-2"
-    }
-  }
-}
-```
-
-Then specify the project in tool calls:
-```
-Use get_section_content with projectName: "paper2", filePath: "main.tex", sectionTitle: "Methods"
-```
-
-## File Structure
-
-```
-OverleafMCP/
-├── overleaf-mcp-server.js    # Main MCP server
-├── overleaf-git-client.js    # Git client library
-├── projects.json             # Your project configuration (gitignored)
-├── projects.example.json     # Example configuration
-├── package.json              # Dependencies
-└── README.md                 # This file
-```
-
 ## Security Notes
 
-- `projects.json` is gitignored to protect your credentials
-- Never commit real project IDs or Git tokens
-- Use the provided `projects.example.json` as a template
+- The Overleaf Git token grants full read/write access to your project — treat it like a password.
+- Prefer `OVERLEAF_GIT_TOKEN_FILE` over inlining the token in the Claude Desktop JSON if your config file is backed up or synced.
+- `projects.json` is `.gitignore`d in this repo. Never commit real project IDs or Git tokens.
+- File paths supplied through MCP tool calls are restricted to the cloned project directory; `..` traversal and absolute paths are rejected.
 
 ## License
 

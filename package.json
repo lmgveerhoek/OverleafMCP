@@ -1,12 +1,17 @@
 {
-  "name": "overleaf-mcp-server",
-  "version": "1.0.0",
-  "description": "MCP server for Overleaf integration",
+  "name": "@mjyoo2/overleaf-mcp",
+  "version": "0.2.0",
+  "description": "MCP server that lets AI assistants read Overleaf projects, parse LaTeX document structure, and push section-level edits back via Git.",
   "type": "module",
   "main": "overleaf-mcp-server.js",
   "bin": {
     "overleaf-mcp": "./overleaf-mcp-server.js"
   },
+  "files": [
+    "overleaf-mcp-server.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node overleaf-mcp-server.js"
   },
@@ -15,5 +20,29 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "author": "Minjong Yoo (https://github.com/mjyoo2)",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mjyoo2/OverleafMCP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mjyoo2/OverleafMCP/issues"
+  },
+  "homepage": "https://github.com/mjyoo2/OverleafMCP#readme",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "overleaf",
+    "latex",
+    "claude",
+    "claude-desktop",
+    "anthropic",
+    "ai-tools"
+  ],
+  "license": "MIT"
 }

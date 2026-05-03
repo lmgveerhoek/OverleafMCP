@@ -58,6 +58,59 @@ No clone, no `npm install`. Add this block to your Claude Desktop config and res
 
 Restart Claude Desktop. The `overleaf` tools should appear in the 🔧 menu.
 
+## Multi-Project Setup
+
+The env-var Quick Start only handles a single project. For multiple projects, drop a `projects.json` file into the user config directory and skip the `env` block in your Claude Desktop config.
+
+**File location**
+
+| OS              | Path |
+|-----------------|------|
+| Windows         | `%APPDATA%\overleaf-mcp\projects.json` |
+| macOS / Linux   | `~/.config/overleaf-mcp/projects.json` (or `$XDG_CONFIG_HOME/overleaf-mcp/projects.json` if set) |
+
+**File contents**
+
+```json
+{
+  "projects": {
+    "default": {
+      "name": "Main Paper",
+      "projectId": "...",
+      "gitToken": "olp_..."
+    },
+    "thesis": {
+      "name": "PhD Thesis",
+      "projectId": "...",
+      "gitToken": "olp_..."
+    }
+  }
+}
+```
+
+**Claude Desktop config** — same as Quick Start but no `env` block:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@mjyoo2/overleaf-mcp"]
+    }
+  }
+}
+```
+
+(Drop `cmd /c` on macOS / Linux.)
+
+Reference a specific project in tool calls with `projectName`:
+
+```
+Use read_file with filePath: "main.tex", projectName: "thesis"
+```
+
+If `projectName` is omitted, the `default` entry is used. To put `projects.json` somewhere other than the standard location, point `OVERLEAF_PROJECTS_CONFIG=/absolute/path/projects.json` at it from the `env` block.
+
 ## Getting Overleaf Credentials
 
 1. **Project ID** — open your Overleaf project; the ID is in the URL: `https://www.overleaf.com/project/[PROJECT_ID]`

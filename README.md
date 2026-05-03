@@ -99,7 +99,7 @@ Get content of a specific section.
 Get a comprehensive project status summary.
 - `projectName`: Project identifier (optional)
 
-### `write_full`
+### `write_file`
 Write the full content of a file to the project.
 - `filePath`: Path to the file (required)
 - `content`: Content to write to the file (required)
@@ -110,7 +110,7 @@ Write the full content of a file to the project.
 Write the content of a specific section to the project.
 - `filePath`: Path to the file (required)
 - `sectionTitle`: Title of the section (required)
-- `content`: Content to write to the section (required)
+- `newContent`: Replacement content for the section, including the section heading (required)
 - `commitMessage`: Commit message (required)
 - `projectName`: Project identifier (optional)
 
@@ -133,10 +133,10 @@ Use get_section_content with filePath: "main.tex" and sectionTitle: "Introductio
 Use get_sections with filePath: "main.tex"
 
 # Write the full content of a file to the project
-Use write_full with filePath: "main.tex", content: "...", commitMessage: "..."
+Use write_file with filePath: "main.tex", content: "...", commitMessage: "..."
 
 # Write the content of a specific section to the project
-Use write_section with filePath: "main.tex", sectionTitle: "Introduction", content: "...", commitMessage: "..."
+Use write_section with filePath: "main.tex", sectionTitle: "Introduction", newContent: "\\section{Introduction}\n...", commitMessage: "..."
 ```
 
 ## Multi-Project Usage

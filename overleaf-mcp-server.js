@@ -24,6 +24,36 @@ const execFileP = promisify(execFileCallback);
 const maskToken = (s) =>
   String(s ?? '').replace(/https:\/\/git:[^@\s]+@/g, 'https://git:***@');
 
+// Pure parser for LaTeX sectioning commands. Brace-balanced so titles with
+// nested macros (e.g. \section{Use of \emph{X}}) are captured correctly.
+// Handles \part, \chapter, \section, \subsection, \subsubsection plus their
+// starred variants and optional [short]{long} short-title form.
+function parseSections(content) {
+  const sections = [];
+  const openerRegex = /\\(subsubsection|subsection|section|chapter|part)\*?(?:\[[^\]]*\])?\{/g;
+  let m;
+  while ((m = openerRegex.exec(content)) !== null) {
+    const startIdx = m.index;
+    let depth = 1;
+    let i = openerRegex.lastIndex;
+    while (i < content.length && depth > 0) {
+      const ch = content[i];
+      if (ch === '\\') { i += 2; continue; } // skip escaped char
+      if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) break;
+      i++;
+    }
+    if (depth !== 0) continue; // unclosed brace, skip
+    sections.push({
+      title: content.slice(openerRegex.lastIndex, i),
+      type: m[1],
+      index: startIdx,
+    });
+    openerRegex.lastIndex = i + 1;
+  }
+  return sections;
+}
+
 // Load projects configuration
 let projectsConfig;
 try {
@@ -104,24 +134,14 @@ class OverleafGitClient {
 
   async getSections(filePath) {
     const content = await this.readFile(filePath);
-    const sections = [];
-    const sectionRegex = /\\(?:section|subsection|subsubsection)\{([^}]+)\}/g;
-    let match;
-
-    while ((match = sectionRegex.exec(content)) !== null) {
-      sections.push({
-        title: match[1],
-        type: match[0].split('{')[0].replace('\\', ''),
-        index: match.index
-      });
-    }
-
-    return sections;
+    return parseSections(content);
   }
 
   async getSectionContent(filePath, sectionTitle) {
+    // Single read + pure parse so the content and section indices come from the
+    // same snapshot (no second pull mid-call).
     const content = await this.readFile(filePath);
-    const sections = await this.getSections(filePath);
+    const sections = parseSections(content);
 
     const targetSection = sections.find(s => s.title === sectionTitle);
     if (!targetSection) {
@@ -146,7 +166,9 @@ class OverleafGitClient {
     }
     const fullPath = this.resolveSafePath(filePath);
     const fileContent = await readFile(fullPath, 'utf-8');
-    const sections = await this.getSections(filePath);
+    // Parse from the same snapshot we are about to splice into — avoids a
+    // TOCTOU race where a second pull would shift section offsets.
+    const sections = parseSections(fileContent);
 
     const target = sections.find(s => s.title === sectionTitle);
     if (!target) {
@@ -154,7 +176,7 @@ class OverleafGitClient {
     }
 
     // Find where the next same-or-higher level section starts, or end of document
-    const sectionLevels = { section: 1, subsection: 2, subsubsection: 3 };
+    const sectionLevels = { part: -1, chapter: 0, section: 1, subsection: 2, subsubsection: 3 };
     const targetLevel = sectionLevels[target.type] ?? 99;
     const next = sections.find(s => s.index > target.index && (sectionLevels[s.type] ?? 99) <= targetLevel);
     const endMarker = fileContent.lastIndexOf('\\end{document}');

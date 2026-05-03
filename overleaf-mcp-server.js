@@ -54,17 +54,173 @@ function parseSections(content) {
   return sections;
 }
 
-// Load projects configuration
-let projectsConfig;
-try {
-  const configPath = path.join(__dirname, 'projects.json');
-  const configData = await readFile(configPath, 'utf-8');
-  projectsConfig = JSON.parse(configData);
-} catch (error) {
-  console.error('Error loading projects.json:', error.message);
-  console.error('Please create projects.json from projects.example.json');
+// ---------------------------------------------------------------------------
+// Configuration loading
+//
+// Priority (first match wins):
+//   1. OVERLEAF_PROJECT_ID + (OVERLEAF_GIT_TOKEN | OVERLEAF_GIT_TOKEN_FILE)
+//      → synthesize a single-project config under the key `default`.
+//      OVERLEAF_PROJECT_NAME is optional and only sets the display name.
+//   2. OVERLEAF_PROJECTS_CONFIG=/path/to/projects.json
+//   3. <user config dir>/overleaf-mcp/projects.json
+//        - Windows: %APPDATA%/overleaf-mcp/projects.json
+//        - Other:   $XDG_CONFIG_HOME/overleaf-mcp/projects.json
+//                   (falls back to ~/.config/overleaf-mcp/projects.json)
+//   4. $CWD/projects.json
+//   5. <package dir>/projects.json   (legacy, for clone-based installs)
+//
+// All diagnostics go to stderr only — stdout is owned by the MCP stdio
+// transport and any stray write would corrupt the JSON-RPC stream.
+// ---------------------------------------------------------------------------
+
+function userConfigCandidate() {
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, 'overleaf-mcp', 'projects.json');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdg, 'overleaf-mcp', 'projects.json');
+}
+
+async function readEnvToken() {
+  const direct = process.env.OVERLEAF_GIT_TOKEN?.trim();
+  if (direct) return { token: direct, source: 'OVERLEAF_GIT_TOKEN' };
+  const tokenFile = process.env.OVERLEAF_GIT_TOKEN_FILE?.trim();
+  if (tokenFile) {
+    try {
+      const raw = await readFile(tokenFile, 'utf-8');
+      return { token: raw.trim(), source: `OVERLEAF_GIT_TOKEN_FILE (${tokenFile})` };
+    } catch (err) {
+      console.error(
+        `[overleaf-mcp] OVERLEAF_GIT_TOKEN_FILE="${tokenFile}" could not be read: ${err.message}`
+      );
+    }
+  }
+  return null;
+}
+
+function validateProject(project, sourceLabel) {
+  if (!project.projectId || /\s/.test(project.projectId)) {
+    console.error(
+      `[overleaf-mcp] FATAL: projectId from ${sourceLabel} is empty or contains whitespace ` +
+        `(got ${JSON.stringify(project.projectId)}). The projectId is used as a path component ` +
+        `and a Git URL — fix it before retrying.`
+    );
+    process.exit(1);
+  }
+  if (!project.gitToken || /\s/.test(project.gitToken)) {
+    console.error(
+      `[overleaf-mcp] Warning: gitToken from ${sourceLabel} is empty or has internal whitespace ` +
+        `(file-based tokens often carry a trailing newline; trying anyway)`
+    );
+  }
+}
+
+async function tryLoadFile(filePath) {
+  try {
+    const raw = await readFile(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function loadExplicitConfigOrExit(filePath, sourceLabel) {
+  let raw;
+  try {
+    raw = await readFile(filePath, 'utf-8');
+  } catch (err) {
+    console.error(`[overleaf-mcp] FATAL: ${sourceLabel}="${filePath}" could not be read: ${err.message}`);
+    process.exit(1);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error(`[overleaf-mcp] FATAL: ${sourceLabel}="${filePath}" is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+function validateConfigShape(data, sourceLabel) {
+  if (!data?.projects || typeof data.projects !== 'object') {
+    console.error(
+      `[overleaf-mcp] FATAL: config from ${sourceLabel} is missing the top-level "projects" object.`
+    );
+    process.exit(1);
+  }
+  for (const [key, p] of Object.entries(data.projects)) {
+    validateProject(p, `${sourceLabel} → projects.${key}`);
+  }
+  return data;
+}
+
+async function loadProjectsConfig() {
+  // 1. Env-var single-project mode wins outright.
+  const envId = process.env.OVERLEAF_PROJECT_ID?.trim();
+  const envTok = await readEnvToken();
+  if (envId && envTok) {
+    // Note any shadowed file so the user can spot misconfiguration at a glance.
+    const shadowCandidates = [];
+    if (process.env.OVERLEAF_PROJECTS_CONFIG) {
+      shadowCandidates.push({ label: 'OVERLEAF_PROJECTS_CONFIG', path: process.env.OVERLEAF_PROJECTS_CONFIG });
+    }
+    shadowCandidates.push({ label: 'user config', path: userConfigCandidate() });
+    shadowCandidates.push({ label: 'cwd', path: path.join(process.cwd(), 'projects.json') });
+    shadowCandidates.push({ label: 'package dir', path: path.join(__dirname, 'projects.json') });
+    let shadow = null;
+    for (const c of shadowCandidates) {
+      const data = await tryLoadFile(c.path);
+      if (data) { shadow = c; break; }
+    }
+    if (shadow) {
+      console.error(
+        `[overleaf-mcp] Using env vars (OVERLEAF_PROJECT_ID + ${envTok.source}). ` +
+          `Also found projects.json at ${shadow.path} — env vars take priority.`
+      );
+    }
+    const project = {
+      name: process.env.OVERLEAF_PROJECT_NAME?.trim() || 'Overleaf Project',
+      projectId: envId,
+      gitToken: envTok.token,
+    };
+    validateProject(project, 'env vars');
+    return { projects: { default: project } };
+  }
+
+  // 2. Explicit OVERLEAF_PROJECTS_CONFIG — must be readable; no silent fallthrough.
+  if (process.env.OVERLEAF_PROJECTS_CONFIG) {
+    const p = process.env.OVERLEAF_PROJECTS_CONFIG;
+    const data = await loadExplicitConfigOrExit(p, 'OVERLEAF_PROJECTS_CONFIG');
+    return validateConfigShape(data, `OVERLEAF_PROJECTS_CONFIG (${p})`);
+  }
+
+  // 3. Implicit fallback chain — first match wins, missing files are not an error.
+  const fallbackCandidates = [
+    { label: 'user config', path: userConfigCandidate() },
+    { label: 'cwd', path: path.join(process.cwd(), 'projects.json') },
+    { label: 'package dir', path: path.join(__dirname, 'projects.json') },
+  ];
+  for (const c of fallbackCandidates) {
+    const data = await tryLoadFile(c.path);
+    if (data) return validateConfigShape(data, `${c.label} (${c.path})`);
+  }
+
+  // 4. Nothing found — print actionable help and exit.
+  console.error('[overleaf-mcp] No configuration found. Set one of:');
+  console.error('  - OVERLEAF_PROJECT_ID + OVERLEAF_GIT_TOKEN          (single-project, recommended)');
+  console.error('  - OVERLEAF_PROJECT_ID + OVERLEAF_GIT_TOKEN_FILE     (token loaded from a file)');
+  console.error('  - OVERLEAF_PROJECTS_CONFIG=/path/to/projects.json   (multi-project)');
+  console.error('  Or place projects.json at one of:');
+  const seen = new Set();
+  for (const c of fallbackCandidates) {
+    const resolved = path.resolve(c.path);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    console.error(`      ${c.path}`);
+  }
   process.exit(1);
 }
+
+const projectsConfig = await loadProjectsConfig();
 
 // Git operations helper
 class OverleafGitClient {

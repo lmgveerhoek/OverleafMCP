@@ -9,7 +9,7 @@ import {
 import { spawn } from 'child_process';
 import { readFile, writeFile, access, readdir } from 'fs/promises';
 import { promisify } from 'util';
-import { exec as execCallback } from 'child_process';
+import { exec as execCallback, execFile as execFileCallback } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
@@ -18,6 +18,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const exec = promisify(execCallback);
+const execFileP = promisify(execFileCallback);
+
+// Strip the Overleaf git token from any string that may leak into errors/output
+const maskToken = (s) =>
+  String(s ?? '').replace(/https:\/\/git:[^@\s]+@/g, 'https://git:***@');
 
 // Load projects configuration
 let projectsConfig;
@@ -40,6 +45,16 @@ class OverleafGitClient {
     this.gitUrl = `https://git.overleaf.com/${projectId}`;
   }
 
+  // Resolve a caller-supplied path under the repo root, refusing traversal
+  resolveSafePath(filePath) {
+    const repoRoot = path.resolve(this.repoPath);
+    const fullPath = path.resolve(repoRoot, filePath);
+    if (fullPath !== repoRoot && !fullPath.startsWith(repoRoot + path.sep)) {
+      throw new Error(`filePath "${filePath}" escapes the project directory`);
+    }
+    return fullPath;
+  }
+
   async cloneOrPull() {
     try {
       await access(path.join(this.repoPath, '.git'));
@@ -55,6 +70,9 @@ class OverleafGitClient {
         `git clone https://git:${this.gitToken}@git.overleaf.com/${this.projectId} "${this.repoPath}"`,
         { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
       );
+      // Set a local committer identity so `git commit` works even when global config is absent
+      await execFileP('git', ['-C', this.repoPath, 'config', 'user.email', 'mcp@overleaf-mcp.local']);
+      await execFileP('git', ['-C', this.repoPath, 'config', 'user.name', 'Overleaf MCP']);
       return stdout;
     }
   }
@@ -80,7 +98,7 @@ class OverleafGitClient {
 
   async readFile(filePath) {
     await this.cloneOrPull();
-    const fullPath = path.join(this.repoPath, filePath);
+    const fullPath = this.resolveSafePath(filePath);
     return await readFile(fullPath, 'utf-8');
   }
 
@@ -126,7 +144,7 @@ class OverleafGitClient {
       }
       throw err;
     }
-    const fullPath = path.join(this.repoPath, filePath);
+    const fullPath = this.resolveSafePath(filePath);
     const fileContent = await readFile(fullPath, 'utf-8');
     const sections = await this.getSections(filePath);
 
@@ -139,7 +157,8 @@ class OverleafGitClient {
     const sectionLevels = { section: 1, subsection: 2, subsubsection: 3 };
     const targetLevel = sectionLevels[target.type] ?? 99;
     const next = sections.find(s => s.index > target.index && (sectionLevels[s.type] ?? 99) <= targetLevel);
-    const endIdx = next ? next.index : fileContent.lastIndexOf('\\end{document}');
+    const endMarker = fileContent.lastIndexOf('\\end{document}');
+    const endIdx = next ? next.index : (endMarker === -1 ? fileContent.length : endMarker);
 
     const updated =
       fileContent.slice(0, target.index) +
@@ -148,10 +167,10 @@ class OverleafGitClient {
 
     await writeFile(fullPath, updated, 'utf-8');
     try {
-      const { stdout } = await exec(
-        `cd "${this.repoPath}" && git add "${filePath}" && git commit -m "${commitMessage}" && git push`,
-        { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
-      );
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+      await execFileP('git', ['-C', this.repoPath, 'add', '--', filePath], { env });
+      await execFileP('git', ['-C', this.repoPath, 'commit', '-m', commitMessage], { env });
+      const { stdout } = await execFileP('git', ['-C', this.repoPath, 'push'], { env });
       return stdout;
     } catch (err) {
       if (err.message.includes('non-fast-forward') || err.message.includes('rejected')) {
@@ -173,13 +192,13 @@ class OverleafGitClient {
       }
       throw err;
     }
-    const fullPath = path.join(this.repoPath, filePath);
+    const fullPath = this.resolveSafePath(filePath);
     await writeFile(fullPath, content, 'utf-8');
     try {
-      const { stdout } = await exec(
-        `cd "${this.repoPath}" && git add "${filePath}" && git commit -m "${commitMessage}" && git push`,
-        { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
-      );
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+      await execFileP('git', ['-C', this.repoPath, 'add', '--', filePath], { env });
+      await execFileP('git', ['-C', this.repoPath, 'commit', '-m', commitMessage], { env });
+      const { stdout } = await execFileP('git', ['-C', this.repoPath, 'push'], { env });
       return stdout;
     } catch (err) {
       if (err.message.includes('non-fast-forward') || err.message.includes('rejected')) {
@@ -512,7 +531,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [
         {
           type: 'text',
-          text: `Error: ${error.message}`,
+          text: `Error: ${maskToken(error.message)}`,
         },
       ],
       isError: true,

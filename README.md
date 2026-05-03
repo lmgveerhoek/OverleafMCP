@@ -12,8 +12,6 @@ An MCP (Model Context Protocol) server that provides access to Overleaf projects
 
 ## Quick Start (recommended)
 
-> Requires `@mjyoo2/overleaf-mcp` to be published to npm. If you're reading this from a freshly-cloned repo and the package isn't on the registry yet, jump to [Local Development](#local-development) for a working local install.
-
 No clone, no `npm install`. Add this block to your Claude Desktop config and restart Claude Desktop.
 
 **Config file location**
@@ -140,23 +138,27 @@ cp projects.example.json projects.json   # then edit it
 
 `projects.json` next to the script is the lowest-priority fallback, so this still works without env vars.
 
-### Option 2 — Test the would-be npm package via a local tarball
+### Option 2 — Test the packed npm artifact locally
 
-This validates the same code path users will hit after `npm publish` (excluding registry resolution):
+Validates almost the same code path users hit through the public registry, useful before pushing a release:
 
 ```bash
 npm pack
-# → mjyoo2-overleaf-mcp-0.2.0.tgz
+# → mjyoo2-overleaf-mcp-<version>.tgz
 ```
 
-Point Claude Desktop at the tarball — `npx` accepts a file path:
+Point Claude Desktop at the tarball. Note the explicit `--package=` and bin name — `npx -y <tarball-path>` does **not** work in npm 10+ (the path is mis-detected as an executable):
 
 ```json
 {
   "mcpServers": {
     "overleaf": {
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "/absolute/path/to/mjyoo2-overleaf-mcp-0.2.0.tgz"],
+      "args": [
+        "/c", "npx", "-y",
+        "--package=C:\\absolute\\path\\to\\mjyoo2-overleaf-mcp-<version>.tgz",
+        "overleaf-mcp"
+      ],
       "env": {
         "OVERLEAF_PROJECT_ID": "...",
         "OVERLEAF_GIT_TOKEN": "olp_..."
@@ -166,7 +168,7 @@ Point Claude Desktop at the tarball — `npx` accepts a file path:
 }
 ```
 
-(Drop the `cmd /c` wrapper on macOS / Linux: `"command": "npx", "args": ["-y", "/path/to/...tgz"]`.)
+On macOS / Linux drop the `cmd /c` wrapper: `"command": "npx", "args": ["-y", "--package=/abs/path/to/...tgz", "overleaf-mcp"]`.
 
 ### Option 3 — Smoke-test the MCP protocol from the shell
 

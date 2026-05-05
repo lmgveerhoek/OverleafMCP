@@ -387,6 +387,53 @@ class OverleafGitClient {
       throw err;
     }
   }
+
+  async replaceText(filePath, oldText, newText, commitMessage) {
+    try {
+      // Pull before writing to avoid conflicts with remote changes
+      await this.cloneOrPull();
+    } catch (err) {
+      if (err.message.includes('CONFLICT')) {
+        throw new Error(
+          `Merge conflict while pulling. Resolve the conflict in Overleaf, then retry.`
+        );
+      }
+      throw err;
+    }
+    const fullPath = this.resolveSafePath(filePath);
+    const fileContent = await readFile(fullPath, 'utf-8');
+
+    // Count occurrences to check for ambiguity
+    const occurrences = fileContent.split(oldText).length - 1;
+
+    if (occurrences === 0) {
+      throw new Error(
+        `Text not found. Ensure you provided the exact existing text, including whitespace and line breaks.`
+      );
+    } else if (occurrences > 1) {
+      throw new Error(
+        `Ambiguous replacement: Found ${occurrences} matches for the provided text. Please include more surrounding lines in 'oldText' to make it unique.`
+      );
+    }
+
+    const updatedContent = fileContent.replace(oldText, newText);
+    await writeFile(fullPath, updatedContent, 'utf-8');
+
+    try {
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+      await execFileP('git', ['-C', this.repoPath, 'add', '--', filePath], { env });
+      await execFileP('git', ['-C', this.repoPath, 'commit', '-m', commitMessage], { env });
+      const { stdout } = await execFileP('git', ['-C', this.repoPath, 'push'], { env });
+      return stdout;
+    } catch (err) {
+      if (err.message.includes('non-fast-forward') || err.message.includes('rejected')) {
+        throw new Error(
+          `Push rejected, remote has new changes. Retry to pull and re-apply your write.`
+        );
+      }
+      throw err;
+    }
+  }
 }
 
 // Create MCP server
@@ -567,6 +614,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['filePath', 'sectionTitle', 'newContent', 'commitMessage'],
         },
       },
+      {
+        name: 'replace_text',
+        description: 'Safely replace a specific block of text in a file to save tokens. Requires exact matching. If the text appears multiple times, you must include more surrounding text to make it unique.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            filePath: {
+              type: 'string',
+              description: 'Path to the file',
+            },
+            oldText: {
+              type: 'string',
+              description: 'The exact existing text to find and replace. Must match whitespace exactly.',
+            },
+            newText: {
+              type: 'string',
+              description: 'The text to replace it with.',
+            },
+            commitMessage: {
+              type: 'string',
+              description: 'Git commit message',
+            },
+            projectName: {
+              type: 'string',
+              description: 'Project identifier (optional)',
+            },
+          },
+          required: ['filePath', 'oldText', 'newText', 'commitMessage'],
+        },
+      },
     ],
   };
 });
@@ -696,6 +773,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: result || 'Section written and pushed successfully.',
+            },
+          ],
+        };
+      }
+
+      case 'replace_text': {
+        const client = getProject(args.projectName);
+        const result = await client.replaceText(
+          args.filePath,
+          args.oldText,
+          args.newText,
+          args.commitMessage
+        );
+        return {
+          content: [
+            {
+              type: 'text',
+              text: result || 'Text replaced and pushed successfully.',
             },
           ],
         };

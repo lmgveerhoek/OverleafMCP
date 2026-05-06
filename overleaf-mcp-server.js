@@ -560,7 +560,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'write_file',
-        description: 'Write content to a file in an Overleaf project and push to Overleaf',
+        description: 'Write content to a file in an Overleaf project and push to Overleaf. DO NOT use this for small edits or typos; use replace_text instead.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -586,7 +586,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'write_section',
-        description: 'Replace a single section in a LaTeX file and push to Overleaf. Safer than write_file for targeted edits — only the named section is replaced, leaving the rest of the file untouched.',
+        description: 'Replace a single section in a LaTeX file and push to Overleaf. DO NOT use this for small edits, fixing typos, or changing a few lines. Always prefer replace_text for surgical edits.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -616,7 +616,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'replace_text',
-        description: 'Safely replace a specific block of text in a file to save tokens. Requires exact matching. If the text appears multiple times, you must include more surrounding text to make it unique.',
+        description: 'PRIMARY TOOL FOR EDITS. Safely replace a specific block of text in a file to save tokens. Use this FIRST for all typos, small changes, or surgical edits anywhere in the project. Requires exact matching. If the text appears multiple times, you must include more surrounding text to make it unique.',
         inputSchema: {
           type: 'object',
           properties: {
